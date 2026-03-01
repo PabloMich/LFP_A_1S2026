@@ -1,13 +1,26 @@
 #include <iostream>
 #include <string>
+#include <fstream>   // para leer archivos
+#include <sstream>   // para separar por comas
+#include <vector>    // para guardar listas de datos
 using namespace std;
+
+struct Estudiante {
+    int carnet;
+    string nombre;
+    string apellido;
+    string carrera;
+    int semestre;
+};
+
+//Vector global de estudiantes
+vector<Estudiante> estudiantes;
 
 // Variables globales para saber si ya se cargaron los archivos
 bool estudiantesCargados = false;
-bool cursosCargados      = false;
-bool notasCargados       = false;
+bool cursosCargados = false;
+bool notasCargados = false;
 
-// ---- Prototipos de funciones (las implementaremos después) ----
 void cargarEstudiantes();
 void cargarCursos();
 void cargarNotas();
@@ -18,7 +31,7 @@ void reporteCursosConMayorReprobacion();
 void reporteAnalisisPorCarrera();
 void mostrarMenu();
 
-// Función principal
+//Función principal
 int main() {
     int opcion;
 
@@ -40,11 +53,10 @@ int main() {
             case 6: reporteTop10();                    break;
             case 7: reporteCursosConMayorReprobacion();break;
             case 8: reporteAnalisisPorCarrera();       break;
-            case 9: cout << "\nSaliendo...\n"; break;
+            case 9: cout << "\nSaliendo del sistema. Hasta luego!\n"; break;
             default: cout << "\nOpcion invalida. Intente de nuevo.\n";
         }
 
-        // Pausa para que el usuario pueda leer el resultado
         if (opcion != 9) {
             cout << "\nPresione ENTER para continuar...";
             cin.get();
@@ -55,7 +67,7 @@ int main() {
     return 0;
 }
 
-// Muestra el menú
+//menú
 void mostrarMenu() {
 
     cout << "\n========================================\n";
@@ -83,12 +95,80 @@ void mostrarMenu() {
     cout << "========================================\n";
 }
 
-// ---- Funciones placeholder (por ahora solo muestran un mensaje) ----
-// Las iremos completando en los siguientes pasos
-
 void cargarEstudiantes() {
-    cout << "\n[TODO] Cargar archivo estudiantes.lfp\n";
-    estudiantesCargados = true; // cambiar a true solo cuando realmente cargue
+    string nombreArchivo;
+    cout << "\nIngrese el nombre del archivo (ej: estudiantes.lfp): ";
+    getline(cin, nombreArchivo);
+
+    // Intentar abrir el archivo
+    ifstream archivo(nombreArchivo);
+
+    if (!archivo.is_open()) {
+        cout << "ERROR: No se pudo abrir el archivo '" << nombreArchivo << "'.\n";
+        return;
+    }
+
+    // Limpiar el vector
+    estudiantes.clear();
+
+    string linea;
+    int lineaNum = 0;
+    int errores  = 0;
+
+    // Leer el archivo
+    while (getline(archivo, linea)) {
+        lineaNum++;
+
+        if (!linea.empty() && linea.back() == '\r')
+            linea.pop_back();
+
+        // Ignorar líneas vacías
+        if (linea.empty()) continue;
+
+        // Separar la línea por comas
+        stringstream ss(linea);
+        string parte;
+        vector<string> campos;
+
+        while (getline(ss, parte, ',')) {   // leer hasta cada coma
+            campos.push_back(parte);
+        }
+
+        // Validar que la línea tenga 5 campos
+        if (campos.size() != 5) {
+            cout << "  [Advertencia] Linea " << lineaNum << " ignorada (formato incorrecto): " << linea << "\n";
+            errores++;
+            continue;
+        }
+
+        // Crear un estudiante
+        Estudiante e;
+        e.carnet    = stoi(campos[0]);   // stoi = string to int
+        e.nombre    = campos[1];
+        e.apellido  = campos[2];
+        e.carrera   = campos[3];
+        e.semestre  = stoi(campos[4]);
+
+        // Validar semestre
+        if (e.semestre < 1 || e.semestre > 10) {
+            cout << "  [Advertencia] Linea " << lineaNum << ": semestre invalido (" << e.semestre << "), se omite.\n";
+            errores++;
+            continue;
+        }
+
+        // Agregar el estudiante al vector
+        estudiantes.push_back(e);
+    }
+
+    archivo.close();
+
+    // Mostrar resumen de la carga
+    cout << "\n--- Carga completada ---\n";
+    cout << "Estudiantes cargados: " << estudiantes.size() << "\n";
+    if (errores > 0)
+        cout << "Lineas con errores:   " << errores << "\n";
+
+    estudiantesCargados = true;
 }
 
 void cargarCursos() {
