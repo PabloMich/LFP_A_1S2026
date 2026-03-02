@@ -196,7 +196,8 @@ void cargarEstudiantes() {
         stringstream ss(linea);
         string parte;
         vector<string> campos;
-        while (getline(ss, parte, ',')) campos.push_back(parte);
+        while (getline(ss, parte, ',')) // esto es el split()
+            campos.push_back(parte);
 
         if (campos.size() != 5) {
             cout << "  [Advertencia] Linea " << lineaNum << " ignorada (campos incorrectos: " << campos.size() << "/5)\n";
@@ -457,33 +458,224 @@ void reporteEstadisticasPorCurso() {
 }
 
 void reporteRendimientoPorEstudiante() {
-    if (!estudiantesCargados || !notasCargados) {
-        cout << "\nERROR: Debe cargar estudiantes y notas primero.\n";
-        return;
+if (!estudiantesCargados || !notasCargados) {
+        cout << "\nERROR: Debe cargar estudiantes y notas primero.\n"; return;
     }
-    cout << "\n[TODO] Generando reporte de rendimiento por estudiante...\n";
+
+    cout << " REPORTE 2: RENDIMIENTO POR ESTUDIANTE  \n";
+
+    ofstream html(carpetaSalida + "/reporte2_rendimiento.html");
+    htmlAbre(html, "Reporte 2: Rendimiento por Estudiante");
+    html << fixed << setprecision(2);
+    html << "<table>\n<tr><th>Nombre</th><th>Carnet</th><th>Carrera</th><th>Semestre</th>"
+         << "<th>Promedio</th><th>Aprobados</th><th>Reprobados</th><th>Creditos</th></tr>\n";
+
+    for (const Estudiante& e : estudiantes) {
+        vector<float> misNotas;
+        int aprobados = 0, reprobados = 0, creditos = 0;
+
+        for (const Nota& n : notas) {
+            if (n.carnet == e.carnet) {
+                misNotas.push_back(n.nota);
+                if (n.nota >= 61) {
+                    aprobados++;
+                    for (const Curso& c : cursos)
+                        if (c.codigo == n.codigoCurso) { creditos += c.creditos; break; }
+                } else reprobados++;
+            }
+        }
+
+        cout << fixed << setprecision(2);
+
+        if (misNotas.empty()) {
+            html << "<tr><td>" << e.nombre << " " << e.apellido << "</td><td>" << e.carnet
+                 << "</td><td>" << e.carrera << "</td><td>" << e.semestre
+                 << "</td><td colspan=\"4\">Sin calificaciones</td></tr>\n";
+            continue;
+        }
+
+        float suma = 0;
+        for (float nota : misNotas) suma += nota;
+        float promedio = suma / misNotas.size();
+
+        string clasePromedio = (promedio >= 61) ? "aprobado" : "reprobado";
+        html << "<tr><td>" << e.nombre << " " << e.apellido << "</td>"
+             << "<td>" << e.carnet << "</td>"
+             << "<td>" << e.carrera << "</td>"
+             << "<td>" << e.semestre << "</td>"
+             << "<td class=\"" << clasePromedio << "\">" << promedio << "</td>"
+             << "<td class=\"aprobado\">"  << aprobados  << "</td>"
+             << "<td class=\"reprobado\">" << reprobados << "</td>"
+             << "<td>" << creditos << "</td></tr>\n";
+    }
+
+    html << "</table>\n";
+    htmlCierra(html);
+    html.close();
+    cout << "\n========================================\n";
+    cout << "Archivo generado: " << carpetaSalida << "/reporte2_rendimiento.html\n";
 }
 
 void reporteTop10() {
     if (!estudiantesCargados || !notasCargados) {
-        cout << "\nERROR: Debe cargar estudiantes y notas primero.\n";
-        return;
+        cout << "\nERROR: Debe cargar estudiantes y notas primero.\n"; return;
     }
-    cout << "\n[TODO] Generando Top 10 mejores estudiantes...\n";
+
+    vector<pair<float, int>> promedios;
+    for (int i = 0; i < (int)estudiantes.size(); i++) {
+        float suma = 0; int cnt = 0;
+        for (const Nota& n : notas)
+            if (n.carnet == estudiantes[i].carnet) { suma += n.nota; cnt++; }
+        if (cnt > 0) promedios.push_back({suma / cnt, i});
+    }
+
+    sort(promedios.begin(), promedios.end(), [](const pair<float,int>& a, const pair<float,int>& b) {
+        return a.first > b.first;
+    });
+
+    cout << " REPORTE 3: TOP 10 MEJORES ESTUDIANTES\n";
+
+    ofstream html(carpetaSalida + "/reporte3_top10.html");
+    htmlAbre(html, "Reporte 3: Top 10 Mejores Estudiantes");
+    html << fixed << setprecision(2);
+    html << "<table>\n<tr><th>#</th><th>Carnet</th><th>Nombre</th><th>Carrera</th><th>Semestre</th><th>Promedio</th></tr>\n";
+
+    int limite = min((int)promedios.size(), 10);
+    for (int i = 0; i < limite; i++) {
+        const Estudiante& e = estudiantes[promedios[i].second];
+        float prom = promedios[i].first;
+        html << "<tr><td>" << (i+1) << "</td><td>" << e.carnet
+             << "</td><td>" << e.nombre << " " << e.apellido
+             << "</td><td>" << e.carrera << "</td><td>" << e.semestre
+             << "</td><td class=\"aprobado\">" << prom << "</td></tr>\n";
+    }
+
+    html << "</table>\n";
+    htmlCierra(html);
+    html.close();
+    cout << "\n========================================\n";
+    cout << "Archivo generado: " << carpetaSalida << "/reporte3_top10.html\n";
 }
 
 void reporteCursosConMayorReprobacion() {
     if (!cursosCargados || !notasCargados) {
-        cout << "\nERROR: Debe cargar cursos y notas primero.\n";
-        return;
+        cout << "\nERROR: Debe cargar cursos y notas primero.\n"; return;
     }
-    cout << "\n[TODO] Generando reporte de cursos con mayor reprobacion...\n";
+
+    struct EstadoCurso {
+        int codigo;
+        string nombre;
+        int total, aprobados, reprobados;
+        float porcentaje;
+    };
+
+    vector<EstadoCurso> estados;
+    for (const Curso& c : cursos) {
+        EstadoCurso ec;
+        ec.codigo = c.codigo; ec.nombre = c.nombre;
+        ec.total = ec.aprobados = ec.reprobados = 0;
+        for (const Nota& n : notas) {
+            if (n.codigoCurso == c.codigo) {
+                ec.total++;
+                if (n.nota >= 61) ec.aprobados++;
+                else ec.reprobados++;
+            }
+        }
+        if (ec.total > 0) {
+            ec.porcentaje = (ec.reprobados * 100.0f) / ec.total;
+            estados.push_back(ec);
+        }
+    }
+
+    sort(estados.begin(), estados.end(), [](const EstadoCurso& a, const EstadoCurso& b) {
+        return a.porcentaje > b.porcentaje;
+    });
+    cout << " REPORTE 4: CURSOS CON MAYOR REPROBACION\n";
+
+    ofstream html(carpetaSalida + "/reporte4_reprobacion.html");
+    htmlAbre(html, "Reporte 4: Cursos con Mayor Reprobacion");
+    html << fixed << setprecision(1);
+    html << "<table>\n<tr><th>Codigo</th><th>Nombre</th><th>Total</th>"
+         << "<th>Aprobados</th><th>Reprobados</th><th>% Reprobacion</th></tr>\n";
+
+    for (const EstadoCurso& ec : estados) {
+
+        string clase = (ec.porcentaje > 50) ? "reprobado" : "aprobado";
+        html << "<tr><td>" << ec.codigo << "</td><td>" << ec.nombre
+             << "</td><td>" << ec.total << "</td>"
+             << "<td class=\"aprobado\">" << ec.aprobados << "</td>"
+             << "<td class=\"reprobado\">" << ec.reprobados << "</td>"
+             << "<td class=\"" << clase << "\">" << ec.porcentaje << "%</td></tr>\n";
+    }
+
+    html << "</table>\n";
+    htmlCierra(html);
+    html.close();
+    cout << "\n========================================\n";
+    cout << "Archivo generado: " << carpetaSalida << "/reporte4_reprobacion.html\n";
 }
 
 void reporteAnalisisPorCarrera() {
     if (!estudiantesCargados || !notasCargados) {
-        cout << "\nERROR: Debe cargar estudiantes y notas primero.\n";
-        return;
+        cout << "\nERROR: Debe cargar estudiantes y notas primero.\n"; return;
     }
-    cout << "\n[TODO] Generando analisis por carrera...\n";
+
+    vector<string> carreras;
+    for (const Estudiante& e : estudiantes) {
+        bool existe = false;
+        for (const string& car : carreras)
+            if (car == e.carrera) { existe = true; break; }
+        if (!existe) carreras.push_back(e.carrera);
+    }
+
+    cout << "REPORTE 5: ANALISIS POR CARRERA\n";
+
+    ofstream html(carpetaSalida + "/reporte5_carreras.html");
+    htmlAbre(html, "Reporte 5: Analisis por Carrera");
+    html << fixed << setprecision(2);
+
+    for (const string& carrera : carreras) {
+
+        int totalEst = 0;
+        float sumaNotas = 0; int cntNotas = 0;
+
+        for (const Estudiante& e : estudiantes) {
+            if (e.carrera == carrera) {
+                totalEst++;
+                for (const Nota& n : notas)
+                    if (n.carnet == e.carnet) { sumaNotas += n.nota; cntNotas++; }
+            }
+        }
+
+        int totalCursos = 0;
+        for (const Curso& c : cursos)
+            if (c.carrera == carrera) totalCursos++;
+
+        float prom = (cntNotas > 0) ? sumaNotas / cntNotas : 0.0f;
+
+        html << "<h2>Carrera: " << carrera << "</h2>\n";
+        html << "<table>\n<tr><th>Dato</th><th>Valor</th></tr>\n";
+        html << "<tr><td>Total estudiantes</td><td>" << totalEst << "</td></tr>\n";
+        html << "<tr><td>Promedio general</td><td>" << prom << "</td></tr>\n";
+        html << "<tr><td>Cursos disponibles</td><td>" << totalCursos << "</td></tr>\n";
+        html << "</table>\n";
+
+        html << "<h3>Distribucion por semestre</h3>\n";
+        html << "<table>\n<tr><th>Semestre</th><th>Estudiantes</th></tr>\n";
+
+        for (int sem = 1; sem <= 10; sem++) {
+            int cnt = 0;
+            for (const Estudiante& e : estudiantes)
+                if (e.carrera == carrera && e.semestre == sem) cnt++;
+            if (cnt > 0) {
+                html << "<tr><td>Semestre " << sem << "</td><td>" << cnt << "</td></tr>\n";
+            }
+        }
+        html << "</table>\n";
+    }
+
+    htmlCierra(html);
+    html.close();
+    cout << "\n========================================\n";
+    cout << "Archivo generado: " << carpetaSalida << "/reporte5_carreras.html\n";
 }
