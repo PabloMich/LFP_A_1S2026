@@ -3,9 +3,15 @@
 #include <fstream> // para leer archivos
 #include <sstream> // para separar por comas
 #include <vector> // para guardar listas de datos
-#include <filesystem> //
+#include <filesystem>
+#include <cmath> // para sqrt
+#include <iomanip> // para fixed y setprecision (decimales)
+# include <algorithm> // para sort
 using namespace std;
 namespace fs = filesystem;
+
+// Se crea la carpeta para guardar los html
+string carpetaSalida = "";
 
 struct Estudiante {
     int carnet;
@@ -23,9 +29,18 @@ struct Curso {
     string carrera;
 };
 
+struct Nota {
+    int carnet;
+    int codigoCurso;
+    float nota; // 0.0 - 100.0
+    string ciclo; // 1S o 2S
+    int anio;
+};
+
 // Vectores globales
 vector<Estudiante> estudiantes;
 vector<Curso> cursos;
+vector<Nota> notas;
 
 //carga
 bool estudiantesCargados = false;
@@ -97,6 +112,10 @@ string seleccionarArchivo(const string& extension, const string& sugerido = "") 
 
 // Funcion principal
 int main() {
+    // Crear carpeta reportes
+    carpetaSalida = (fs::current_path() / "reportes").string();
+    fs::create_directories(carpetaSalida); // la crea si no existe, no falla si ya existe
+    cout << "Reportes HTML se guardaran en: " << carpetaSalida << "";
     int opcion;
 
     do {
@@ -107,14 +126,14 @@ int main() {
         cin.ignore();
 
         switch (opcion) {
-            case 1: cargarEstudiantes();               break;
-            case 2: cargarCursos();                    break;
-            case 3: cargarNotas();                     break;
-            case 4: reporteEstadisticasPorCurso();     break;
+            case 1: cargarEstudiantes(); break;
+            case 2: cargarCursos(); break;
+            case 3: cargarNotas();break;
+            case 4: reporteEstadisticasPorCurso(); break;
             case 5: reporteRendimientoPorEstudiante(); break;
-            case 6: reporteTop10();                    break;
-            case 7: reporteCursosConMayorReprobacion();break;
-            case 8: reporteAnalisisPorCarrera();       break;
+            case 6: reporteTop10(); break;
+            case 7: reporteCursosConMayorReprobacion(); break;
+            case 8: reporteAnalisisPorCarrera(); break;
             case 9: cout << "\nSaliendo del sistema. Hasta luego!\n"; break;
             default: cout << "\nOpcion invalida. Intente de nuevo.\n";
         }
@@ -153,6 +172,7 @@ void mostrarMenu() {
     cout << "========================================\n";
 }
 
+// Carga de archivos
 void cargarEstudiantes() {
     string nombreArchivo = seleccionarArchivo(".lfp", "estudiantes");
     if (nombreArchivo.empty()) return;
@@ -278,23 +298,162 @@ void cargarCursos() {
     archivo.close();
 
     cout << "\n--- Carga completada ---\n";
-    cout << "Cursos cargados:  " << cursos.size() << "\n";
+    cout << "Cursos cargados: " << cursos.size() << "\n";
     if (errores > 0) cout << "Lineas con errores: " << errores << "\n";
 
     cursosCargados = true;
 }
 
 void cargarNotas() {
-    cout << "\n[TODO] Cargar archivo notas.lfp\n";
+    string nombreArchivo = seleccionarArchivo(".lfp", "notas");
+    if (nombreArchivo.empty()) return;
+
+    ifstream archivo(nombreArchivo);
+    if (!archivo.is_open()) {
+        cout << "ERROR: No se pudo abrir el archivo.\n";
+        return;
+    }
+
+    notas.clear();
+    string linea;
+    int lineaNum = 0, errores = 0;
+
+    while (getline(archivo, linea)) {
+        lineaNum++;
+        if (!linea.empty() && linea.back() == '\r') linea.pop_back();
+        if (linea.empty()) continue;
+
+        stringstream ss(linea);
+        string parte;
+        vector<string> campos;
+        while (getline(ss, parte, ',')) campos.push_back(parte);
+
+        // 5 campos
+        if (campos.size() != 5) {
+            cout << "[Advertencia] Linea" << lineaNum << "ignorada (campos incorrectos: " << campos.size() << "/5)\n)";
+            errores++; continue;
+        }
+
+        try {
+            Nota n;
+            n.carnet = stoi(campos[0]);
+            n.codigoCurso = stoi(campos[1]);
+            n.nota = stof(campos[2]); // string to float
+            n.ciclo = campos[3];
+            n.anio = stoi(campos[4]);
+
+            // validar nota entre 0 y 100
+            if (n.nota < 0.0f || n.nota > 100.0f) {
+                cout << "  [Advertencia] Linea " << lineaNum << ": ciclo invalido (\"" << n.ciclo << "\"), se omite.\n";
+                errores++;
+            }
+            notas.push_back(n);
+        } catch (const invalid_argument&) {
+            cout << "[Error] Linea " << lineaNum << ": valor no numerico -> \"" << linea << "\"\n";
+            errores++;
+        }
+    }
+    archivo.close();
+
+    cout << "\n--- Carga completada ---\n";
+    cout << "Notas cargadas: " << notas.size() << "\n";
+    if (errores > 0) cout << "Lineas con errores: " << errores << "\n";
+
     notasCargados = true;
 }
 
-void reporteEstadisticasPorCurso() {
-    if (!cursosCargados || !notasCargados) {
-        cout << "\nERROR: Debe cargar cursos y notas primero.\n";
+// Utilidades HTML
+void htmlAbre(ofstream& f, const string& titulo) {
+    if (!f.is_open()) {
+        cout << "  [ERROR HTML] No se pudo crear el archivo HTML.\n";
+        cout << "  Carpeta actual: " << fs::current_path().string() << "\n";
         return;
     }
-    cout << "\n[TODO] Generando reporte de estadisticas por curso...\n";
+    f << "<!DOCTYPE html>\n<html lang=\"es\">\n<head>\n";
+    f << "<meta charset=\"UTF-8\">\n";
+    f << "<title>" << titulo << "</title>\n";
+    f << "<style>\n";
+    f << "  body { font-family: Arial, sans-serif; margin: 30px; background: #f4f4f4; }\n";
+    f << "  h1   { background: #2c3e50; color: white; padding: 15px; border-radius: 6px; }\n";
+    f << "  h2   { color: #2c3e50; border-bottom: 2px solid #2c3e50; padding-bottom: 5px; }\n";
+    f << "  table{ width: 100%; border-collapse: collapse; margin-bottom: 30px; background: white; }\n";
+    f << "  th   { background: #2c3e50; color: white; padding: 10px; text-align: left; }\n";
+    f << "  td   { padding: 8px 10px; border-bottom: 1px solid #ddd; }\n";
+    f << "  tr:hover { background: #eaf0fb; }\n";
+    f << "  .aprobado  { color: #27ae60; font-weight: bold; }\n";
+    f << "  .reprobado { color: #e74c3c; font-weight: bold; }\n";
+    f << "  .badge { background:#2c3e50; color:white; border-radius:12px; padding:2px 10px; font-size:0.85em; }\n";
+    f << "</style>\n</head>\n<body>\n";
+    f << "<h1>" << titulo << "</h1>\n";
+}
+
+void htmlCierra(ofstream& f) {
+    f << "</body>\n</html>\n";
+}
+
+// Reportes
+void reporteEstadisticasPorCurso() {
+    if (!cursosCargados || !notasCargados) {
+        cout << "\nERROR: Debe cargar cursos y notas primero.\n"; return;
+    }
+
+    cout << " REPORTE 1: ESTADISTICAS POR CURSO \n";
+
+    //Abrir html
+    ofstream html(carpetaSalida + "/reporte1_estadisticas.html");
+    htmlAbre(html, "Reporte 1: Estadisticas por Curso");
+    html << fixed << setprecision(2);  // 2 decimales en el html
+
+    for (const Curso& c : cursos) {
+        vector<float> notasCurso;
+        for (const Nota& n : notas)
+            if (n.codigoCurso == c.codigo)
+                notasCurso.push_back(n.nota);
+
+        html << "<h2>" << c.nombre << " <span class=\"badge\">Codigo: " << c.codigo << "</span></h2>\n";
+
+        if (notasCurso.empty()) {
+            cout << "  Sin calificaciones registradas.\n";
+            html << "<p>Sin calificaciones registradas.</p>\n";
+            continue;
+        }
+
+        float suma = 0, maximo = notasCurso[0], minimo = notasCurso[0];
+        for (float nota : notasCurso) {
+            suma += nota;
+            if (nota > maximo) maximo = nota;
+            if (nota < minimo) minimo = nota;
+        }
+        float promedio = suma / notasCurso.size();
+
+        float sumaDif = 0;
+        for (float nota : notasCurso)
+            sumaDif += (nota - promedio) * (nota - promedio);
+        float desviacion = sqrt(sumaDif / notasCurso.size());
+
+        vector<float> ord = notasCurso;
+        sort(ord.begin(), ord.end());
+        float mediana;
+        int tam = ord.size();
+        mediana = (tam % 2 == 0) ? (ord[tam/2-1] + ord[tam/2]) / 2.0f : ord[tam/2];
+
+        // HTML
+        html << "<table>\n";
+        html << "<tr><th>Estadistica</th><th>Valor</th></tr>\n";
+        html << "<tr><td>Estudiantes</td><td>" << notasCurso.size() << "</td></tr>\n";
+        html << "<tr><td>Promedio</td><td>" << promedio << "</td></tr>\n";
+        html << "<tr><td>Nota maxima</td><td>" << maximo << "</td></tr>\n";
+        html << "<tr><td>Nota minima</td><td>" << minimo << "</td></tr>\n";
+        html << "<tr><td>Desv. estandar</td><td>" << desviacion << "</td></tr>\n";
+        html << "<tr><td>Mediana</td><td>" << mediana << "</td></tr>\n";
+        html << "</table>\n";
+    }
+
+    htmlCierra(html);
+    html.close();
+
+    cout << "\n========================================\n";
+    cout << "Archivo generado: " << carpetaSalida << "/reporte1_estadisticas.html\n";
 }
 
 void reporteRendimientoPorEstudiante() {
