@@ -1,27 +1,36 @@
 #include <iostream>
 #include <string>
-#include <fstream>     // para leer archivos
-#include <sstream>     // para separar por comas
-#include <vector>      // para guardar listas de datos
-#include <filesystem>
+#include <fstream> // para leer archivos
+#include <sstream> // para separar por comas
+#include <vector> // para guardar listas de datos
+#include <filesystem> //
 using namespace std;
 namespace fs = filesystem;
 
 struct Estudiante {
-    int    carnet;
+    int carnet;
     string nombre;
     string apellido;
     string carrera;
-    int    semestre;
+    int semestre;
+};
+
+struct Curso {
+    int codigo;
+    string nombre;
+    int creditos; // 1-8
+    int semestre; // semestre en que se imparte 1-10
+    string carrera;
 };
 
 // Vectores globales
 vector<Estudiante> estudiantes;
+vector<Curso> cursos;
 
-//Flags de carga
+//carga
 bool estudiantesCargados = false;
-bool cursosCargados      = false;
-bool notasCargados       = false;
+bool cursosCargados = false;
+bool notasCargados = false;
 
 string seleccionarArchivo(const string& extension);
 void cargarEstudiantes();
@@ -34,46 +43,56 @@ void reporteCursosConMayorReprobacion();
 void reporteAnalisisPorCarrera();
 void mostrarMenu();
 
-string seleccionarArchivo(const string& extension) {
-    vector<string> archivosEncontrados;
+// Seleccionar archivos a cargar
+string seleccionarArchivo(const string& extension, const string& sugerido = "") {
+    vector<string> encontrados;
 
-    // Recorrer la carpeta actual buscando archivos con la extensión dada
     for (const auto& entrada : fs::directory_iterator(".")) {
         if (entrada.is_regular_file()) {
             string nombre = entrada.path().filename().string();
-            // Verificar si el nombre termina con la extensión buscada
-            if (nombre.size() >= extension.size() &&
-                nombre.substr(nombre.size() - extension.size()) == extension) {
-                archivosEncontrados.push_back(nombre);
+            // El archivo debe tener la extension correcta
+            if (nombre.size() < extension.size()) continue;
+            if (nombre.substr(nombre.size() - extension.size()) != extension) continue;
+            // Si se dio una palabra clave, el nombre debe contenerla
+            if (!sugerido.empty() && nombre.find(sugerido) == string::npos) continue;
+            encontrados.push_back(nombre);
+        }
+    }
+
+    // Si no hay coincidencias con el filtro, mostrar todos los .lfp
+    if (encontrados.empty()) {
+        cout << "\n[Aviso] No se encontro un archivo con \"" << sugerido << "\" en el nombre.\n";
+        cout << "Mostrando todos los archivos " << extension << " disponibles:\n";
+        for (const auto& entrada : fs::directory_iterator(".")) {
+            if (entrada.is_regular_file()) {
+                string nombre = entrada.path().filename().string();
+                if (nombre.size() >= extension.size() &&
+                    nombre.substr(nombre.size() - extension.size()) == extension)
+                    encontrados.push_back(nombre);
             }
         }
     }
 
-    // Si no hay archivos con esa extensión, avisamos
-    if (archivosEncontrados.empty()) {
+    if (encontrados.empty()) {
         cout << "\nNo se encontraron archivos *" << extension << " en la carpeta actual.\n";
-        cout << "Asegurese de que el archivo este en la misma carpeta que el ejecutable.\n";
         return "";
     }
 
-    // Mostrar la lista numerada para que el usuario elija
     cout << "\nArchivos disponibles:\n";
-    for (int i = 0; i < (int)archivosEncontrados.size(); i++) {
-        cout << "  " << (i + 1) << ". " << archivosEncontrados[i] << "\n";
-    }
-    cout << " 0. Cancelar\n";
+    for (int i = 0; i < (int)encontrados.size(); i++)
+        cout << "  " << (i + 1) << ". " << encontrados[i] << "\n";
+    cout << "  0. Cancelar\n";
     cout << "Seleccione un archivo: ";
 
-    int opcion;
-    cin >> opcion;
+    int op;
+    cin >> op;
     cin.ignore();
 
-    if (opcion < 1 || opcion > (int)archivosEncontrados.size()) {
+    if (op < 1 || op > (int)encontrados.size()) {
         cout << "Operacion cancelada.\n";
         return "";
     }
-
-    return archivosEncontrados[opcion - 1];
+    return encontrados[op - 1];
 }
 
 // Funcion principal
@@ -84,7 +103,7 @@ int main() {
         mostrarMenu();
 
         cout << "Seleccione una opcion: ";
-        cin  >> opcion;
+        cin >> opcion;
         cin.ignore();
 
         switch (opcion) {
@@ -135,7 +154,7 @@ void mostrarMenu() {
 }
 
 void cargarEstudiantes() {
-    string nombreArchivo = seleccionarArchivo(".lfp");
+    string nombreArchivo = seleccionarArchivo(".lfp", "estudiantes");
     if (nombreArchivo.empty()) return;
 
     ifstream archivo(nombreArchivo);
@@ -145,45 +164,47 @@ void cargarEstudiantes() {
     }
 
     estudiantes.clear();
-
     string linea;
     int lineaNum = 0, errores = 0;
 
     while (getline(archivo, linea)) {
         lineaNum++;
-
-        if (!linea.empty() && linea.back() == '\r')
-            linea.pop_back();
-
+        if (!linea.empty() && linea.back() == '\r') linea.pop_back();
         if (linea.empty()) continue;
 
         // Separar por comas
         stringstream ss(linea);
         string parte;
         vector<string> campos;
-        while (getline(ss, parte, ','))
-            campos.push_back(parte);
+        while (getline(ss, parte, ',')) campos.push_back(parte);
 
         if (campos.size() != 5) {
-            cout << "  [Advertencia] Linea " << lineaNum << " ignorada (formato incorrecto)\n";
+            cout << "  [Advertencia] Linea " << lineaNum << " ignorada (campos incorrectos: " << campos.size() << "/5)\n";
             errores++;
             continue;
         }
 
-        Estudiante e;
-        e.carnet   = stoi(campos[0]);
-        e.nombre   = campos[1];
-        e.apellido = campos[2];
-        e.carrera  = campos[3];
-        e.semestre = stoi(campos[4]);
+        try {
+            Estudiante e;
+            e.carnet = stoi(campos[0]);
+            e.nombre = campos[1];
+            e.apellido = campos[2];
+            e.carrera = campos[3];
+            e.semestre = stoi(campos[4]);
 
-        if (e.semestre < 1 || e.semestre > 10) {
-            cout << "  [Advertencia] Linea " << lineaNum << ": semestre invalido, se omite.\n";
+            if (e.semestre < 1 || e.semestre > 10) {
+                cout << "  [Advertencia] Linea " << lineaNum << ": semestre invalido, se omite.\n";
+                errores++;
+                continue;
+            }
+
+            estudiantes.push_back(e);
+
+        } catch (const invalid_argument&) {
+            cout << "  [Error] Linea " << lineaNum << ": valor no numerico -> \"" << linea << "\"\n";
             errores++;
-            continue;
         }
 
-        estudiantes.push_back(e);
     }
 
     archivo.close();
@@ -191,13 +212,75 @@ void cargarEstudiantes() {
     cout << "\n--- Carga completada ---\n";
     cout << "Estudiantes cargados: " << estudiantes.size() << "\n";
     if (errores > 0)
-        cout << "Lineas con errores:   " << errores << "\n";
+        cout << "Lineas con errores: " << errores << "\n";
 
     estudiantesCargados = true;
 }
 
 void cargarCursos() {
-    cout << "\n[TODO] Cargar archivo cursos.lfp\n";
+    string nombreArchivo = seleccionarArchivo(".lfp", "cursos");
+    if (nombreArchivo.empty()) return;
+
+    ifstream archivo(nombreArchivo);
+    if (!archivo.is_open()) {
+        cout << "ERROR: No se pudo abrir el archivo.\n";
+        return;
+    }
+
+    cursos.clear();
+    string linea;
+    int lineaNum = 0, errores = 0;
+
+    while (getline(archivo, linea)) {
+        lineaNum++;
+        if (!linea.empty() && linea.back() == '\r') linea.pop_back();
+        if (linea.empty()) continue;
+
+        // Separar por comas
+        stringstream ss(linea);
+        string parte;
+        vector<string> campos;
+        while (getline(ss, parte, ',')) campos.push_back(parte);
+
+        // Validar que tenga 5 campos
+        if (campos.size() != 5) {
+            cout << "  [Advertencia] Linea " << lineaNum << " ignorada (campos incorrectos: " << campos.size() << "/5)\n";
+            errores++; continue;
+        }
+
+        try {
+            Curso c;
+            c.codigo = stoi(campos[0]);
+            c.nombre = campos[1];
+            c.creditos = stoi(campos[2]);
+            c.semestre = stoi(campos[3]);
+            c.carrera = campos[4];
+
+            // Validar rangos
+            if (c.creditos < 1 || c.creditos > 8) {
+                cout << "[Advertencia] Linea " << lineaNum << ": Creditos invalidos (" << c.creditos << "), se omite.\n";
+                errores++; continue;
+            }
+
+            if (c.semestre < 1 || c.semestre > 10) {
+                cout << "[Advertencia] Linea " << lineaNum << ": Semestre invalido (" << c.semestre << "), se omite.\n";
+                errores++; continue;
+            }
+
+            cursos.push_back(c);
+
+        } catch (const invalid_argument&) {
+            cout << "  [Error] Linea " << lineaNum << ": valor no numerico -> \"" << linea << "\"\n";
+            errores++;
+        }
+
+    }
+    archivo.close();
+
+    cout << "\n--- Carga completada ---\n";
+    cout << "Cursos cargados:  " << cursos.size() << "\n";
+    if (errores > 0) cout << "Lineas con errores: " << errores << "\n";
+
     cursosCargados = true;
 }
 
